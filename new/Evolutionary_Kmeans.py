@@ -65,21 +65,23 @@ def _k_init(X, n_clusters, x_squared_norms, random_state, n_local_trials=None):
     """Init n_clusters seeds according to k-means++
 
     Parameters
-    -----------
-    X: array or sparse matrix, shape (n_samples, n_features)
+    ----------
+    X : array or sparse matrix, shape (n_samples, n_features)
         The data to pick seeds for. To avoid memory copy, the input data
         should be double precision (dtype=np.float64).
 
-    n_clusters: integer
+    n_clusters : integer
         The number of seeds to choose
 
-    x_squared_norms: array, shape (n_samples,)
+    x_squared_norms : array, shape (n_samples,)
         Squared Euclidean norm of each data point.
 
-    random_state: numpy.RandomState
-        The generator used to initialize the centers.
+    random_state : int, RandomState instance
+        The generator used to initialize the centers. Use an int to make the
+        randomness deterministic.
+        See :term:`Glossary <random_state>`.
 
-    n_local_trials: integer, optional
+    n_local_trials : integer, optional
         The number of seeding trials for each center (except the first),
         of which the one reducing inertia the most is greedily chosen.
         Set to None to make the number of trials depend logarithmically
@@ -97,7 +99,7 @@ def _k_init(X, n_clusters, x_squared_norms, random_state, n_local_trials=None):
     """
     n_samples, n_features = X.shape
 
-    centers = np.empty((n_clusters, n_features))
+    centers = np.empty((n_clusters, n_features), dtype=X.dtype)
 
     assert x_squared_norms is not None, 'x_squared_norms None in _k_init'
 
@@ -116,8 +118,9 @@ def _k_init(X, n_clusters, x_squared_norms, random_state, n_local_trials=None):
         centers[0] = X[center_id]
 
     # Initialize list of closest distances and calculate current potential
-    closest_dist_sq = cosine_distances(
-        centers[0, np.newaxis], X)
+    closest_dist_sq = euclidean_distances(
+        centers[0, np.newaxis], X, Y_norm_squared=x_squared_norms,
+        squared=True)
     current_pot = closest_dist_sq.sum()
 
     # Pick the remaining n_clusters-1 points
@@ -125,11 +128,15 @@ def _k_init(X, n_clusters, x_squared_norms, random_state, n_local_trials=None):
         # Choose center candidates by sampling with probability proportional
         # to the squared distance to the closest existing center
         rand_vals = random_state.random_sample(n_local_trials) * current_pot
-        candidate_ids = np.searchsorted(closest_dist_sq.cumsum(), rand_vals)
+        candidate_ids = np.searchsorted(stable_cumsum(closest_dist_sq),
+                                        rand_vals)
+        # XXX: numerical imprecision can result in a candidate_id out of range
+        np.clip(candidate_ids, None, closest_dist_sq.size - 1,
+                out=candidate_ids)
 
         # Compute distances to center candidates
-        distance_to_candidates = cosine_distances(
-            X[candidate_ids], X)
+        distance_to_candidates = euclidean_distances(
+            X[candidate_ids], X, Y_norm_squared=x_squared_norms, squared=True)
 
         # Decide which candidate is the best
         best_candidate = None
@@ -183,10 +190,26 @@ def _tolerance(X, tol):
     return np.mean(variances) * tol
 
 
-def k_means(X, n_clusters,lastCenters,lastCategory,isFirst, init='random', precompute_distances='auto',
-            n_init=10, max_iter=300, verbose=False,
-            tol=1e-4, random_state=None, copy_x=True, n_jobs=1,
-            return_n_iter=False):
+def _check_sample_weight(X, sample_weight):
+    """Set sample_weight if None, and check for correct dtype"""
+    n_samples = X.shape[0]
+    if sample_weight is None:
+        return np.ones(n_samples, dtype=X.dtype)
+    else:
+        sample_weight = np.asarray(sample_weight)
+        if n_samples != len(sample_weight):
+            raise ValueError("n_samples=%d should be == len(sample_weight)=%d"
+                             % (n_samples, len(sample_weight)))
+        # normalize the weights to sum up to n_samples
+        scale = n_samples / sample_weight.sum()
+        return (sample_weight * scale).astype(X.dtype, copy=False)
+
+
+# TODO 适配python3
+def k_means(X, n_clusters, lastCenters, lastCategory, isFirst, sample_weight=None, init='k-means++',
+            precompute_distances='auto', n_init=10, max_iter=300,
+            verbose=False, tol=1e-4, random_state=None, copy_x=True,
+            n_jobs=None, algorithm="auto", return_n_iter=False):
     """K-means clustering algorithm.
 
     Read more in the :ref:`User Guide <k_means>`.
@@ -194,19 +217,17 @@ def k_means(X, n_clusters,lastCenters,lastCategory,isFirst, init='random', preco
     Parameters
     ----------
     X : array-like or sparse matrix, shape (n_samples, n_features)
-        The observations to cluster.
+        The observations to cluster. It must be noted that the data
+        will be converted to C ordering, which will cause a memory copy
+        if the given data is not C-contiguous.
 
     n_clusters : int
         The number of clusters to form as well as the number of
         centroids to generate.
 
-    max_iter : int, optional, default 300
-        Maximum number of iterations of the k-means algorithm to run.
-
-    n_init : int, optional, default: 10
-        Number of time the k-means algorithm will be run with different
-        centroid seeds. The final results will be the best output of
-        n_init consecutive runs in terms of inertia.
+    sample_weight : array-like, shape (n_samples,), optional
+        The weights for each observation in X. If None, all observations
+        are assigned equal weight (default: None)
 
     init : {'k-means++', 'random', or ndarray, or a callable}, optional
         Method for initialization, default to 'k-means++':
@@ -215,8 +236,8 @@ def k_means(X, n_clusters,lastCenters,lastCategory,isFirst, init='random', preco
         clustering in a smart way to speed up convergence. See section
         Notes in k_init for more details.
 
-        'random': generate k centroids from a Gaussian with mean and
-        variance estimated from the data.
+        'random': choose k observations (rows) at random from data for
+        the initial centroids.
 
         If an ndarray is passed, it should be of shape (n_clusters, n_features)
         and gives the initial centers.
@@ -235,32 +256,47 @@ def k_means(X, n_clusters,lastCenters,lastCategory,isFirst, init='random', preco
 
         False : never precompute distances
 
-    tol : float, optional
-        The relative increment in the results before declaring convergence.
+    n_init : int, optional, default: 10
+        Number of time the k-means algorithm will be run with different
+        centroid seeds. The final results will be the best output of
+        n_init consecutive runs in terms of inertia.
+
+    max_iter : int, optional, default 300
+        Maximum number of iterations of the k-means algorithm to run.
 
     verbose : boolean, optional
         Verbosity mode.
 
-    random_state : integer or numpy.RandomState, optional
-        The generator used to initialize the centers. If an integer is
-        given, it fixes the seed. Defaults to the global numpy random
-        number generator.
+    tol : float, optional
+        The relative increment in the results before declaring convergence.
+
+    random_state : int, RandomState instance or None (default)
+        Determines random number generation for centroid initialization. Use
+        an int to make the randomness deterministic.
+        See :term:`Glossary <random_state>`.
 
     copy_x : boolean, optional
         When pre-computing distances it is more numerically accurate to center
-        the data first.  If copy_x is True, then the original data is not
-        modified.  If False, the original data is modified, and put back before
-        the function returns, but small numerical differences may be introduced
-        by subtracting and then adding the data mean.
+        the data first.  If copy_x is True (default), then the original data is
+        not modified, ensuring X is C-contiguous.  If False, the original data
+        is modified, and put back before the function returns, but small
+        numerical differences may be introduced by subtracting and then adding
+        the data mean, in this case it will also not ensure that data is
+        C-contiguous which may cause a significant slowdown.
 
-    n_jobs : int
+    n_jobs : int or None, optional (default=None)
         The number of jobs to use for the computation. This works by computing
         each of the n_init runs in parallel.
 
-        If -1 all CPUs are used. If 1 is given, no parallel computing code is
-        used at all, which is useful for debugging. For n_jobs below -1,
-        (n_cpus + 1 + n_jobs) are used. Thus for n_jobs = -2, all CPUs but one
-        are used.
+        ``None`` means 1 unless in a :obj:`joblib.parallel_backend` context.
+        ``-1`` means using all processors. See :term:`Glossary <n_jobs>`
+        for more details.
+
+    algorithm : "auto", "full" or "elkan", default="auto"
+        K-means algorithm to use. The classical EM-style algorithm is "full".
+        The "elkan" variation is more efficient by using the triangle
+        inequality, but currently doesn't support sparse data. "auto" chooses
+        "elkan" for dense data and "full" for sparse data.
 
     return_n_iter : bool, optional
         Whether or not to return the number of iterations.
@@ -278,7 +314,7 @@ def k_means(X, n_clusters,lastCenters,lastCategory,isFirst, init='random', preco
         The final value of the inertia criterion (sum of squared distances to
         the closest centroid for all observations in the training set).
 
-    best_n_iter: int
+    best_n_iter : int
         Number of iterations corresponding to the best results.
         Returned only if `return_n_iter` is set to True.
 
@@ -292,8 +328,15 @@ def k_means(X, n_clusters,lastCenters,lastCategory,isFirst, init='random', preco
         raise ValueError('Number of iterations should be a positive number,'
                          ' got %d instead' % max_iter)
 
-    best_inertia = np.infty
-    X = as_float_array(X, copy=copy_x)
+    # avoid forcing order when copy_x=False
+    order = "C" if copy_x else None
+    X = check_array(X, accept_sparse='csr', dtype=[np.float64, np.float32],
+                    order=order, copy=copy_x)
+    # verify that the number of samples given is larger than k
+    if _num_samples(X) < n_clusters:
+        raise ValueError("n_samples=%d should be >= n_clusters=%d" % (
+            _num_samples(X), n_clusters))
+
     tol = _tolerance(X, tol)
 
     # If the distances are precomputed every job will create a matrix of shape
@@ -310,26 +353,29 @@ def k_means(X, n_clusters,lastCenters,lastCategory,isFirst, init='random', preco
                          ", but a value of %r was passed" %
                          precompute_distances)
 
-    # subtract of mean of x for more accurate distance computations
-    if not sp.issparse(X) or hasattr(init, '__array__'):
-        X_mean = X.mean(axis=0)
-    if not sp.issparse(X):
-        # The copy was already done above
-        X -= X_mean
-        if isFirst==False:
-            lastCenters-=X_mean
-
+    # Validate init array
     if hasattr(init, '__array__'):
-        init = check_array(init, dtype=np.float64, copy=True)
+        init = check_array(init, dtype=X.dtype.type, copy=True)
         _validate_center_shape(X, n_clusters, init)
 
-        init -= X_mean
         if n_init != 1:
             warnings.warn(
                 'Explicit initial center position passed: '
                 'performing only one init in k-means instead of n_init=%d'
                 % n_init, RuntimeWarning, stacklevel=2)
             n_init = 1
+
+
+    # subtract of mean of x for more accurate distance computations
+     if not sp.issparse(X):
+        X_mean = X.mean(axis=0)
+        # The copy was already done above
+        X -= X_mean
+        if not isFirst:
+            lastCenters-=X_mean
+
+        if hasattr(init, '__array__'):
+            init -= X_mean
 
     # precompute squared norms of data points
     x_squared_norms = row_norms(X, squared=True)
