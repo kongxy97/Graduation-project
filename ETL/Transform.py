@@ -5,8 +5,9 @@ Created on 2016年12月1日
 @author: maitian13
 '''
 # import time
-from ETL.Extract import DataExtracter 
-from sqlite3 import datetime
+import datetime
+
+from ETL.Extract import DataExtracter
 from ETL.Loader import DataLoader
 import pandas as pd
 # from sklearn.cluster import KMeans
