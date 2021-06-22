@@ -1,9 +1,13 @@
 # -*- coding:utf-8 -*-
 # Time : 2021/6/20
 # Author : Xiangyuan Kong
+import datetime
 
 import numpy as np
 from matplotlib import pyplot
+
+from ETL.Extract import DataExtracter
+from ETL.Transform import Transformer
 
 
 class KMeans(object):
@@ -98,6 +102,41 @@ class KMeans(object):
 
 
 if __name__ == '__main__':
+    """
+    96data201501.csv数据格式：
+              ycid        time      1       5  ...    93      sum  maxload  minload
+    0      5776593  2015-01-01  0.070  0.0600  ...  0.06   1.8334     0.14     0.06
+    32     5782689  2015-01-01  0.650  0.6200  ...  1.27  22.6817     2.10     0.10
+    71     5880741  2015-01-01  0.010  0.0000  ...  0.01   0.0662     0.01     0.00
+    148    5880321  2015-01-01  1.300  0.3400  ...  1.18   9.8400     1.30     0.06
+    181    5881086  2015-01-01  0.000  0.0000  ...  0.00   0.0000     0.00     0.00
+    ...        ...         ...    ...     ...  ...   ...      ...      ...      ...
+    33832  5928173  2015-01-01  0.220  0.1500  ...  0.14   4.6200     0.83     0.01
+    33864  5928185  2015-01-01  0.000  0.0000  ...  0.00   0.0000     0.00     0.00
+    33896  5928299  2015-01-01  0.000  0.0000  ...  0.00   0.0000     0.00     0.00
+    33928  5928320  2015-01-01  0.101  0.0728  ...  0.36   4.1431     1.06     0.00
+    33960  5928440  2015-01-01  0.000  0.0000  ...  0.00   0.0000     0.00     0.00
+    
+    处理后数据格式：
+    [1016 rows x 29 columns]
+    [[0.07   0.06   0.08   ... 0.07   0.08   0.06  ]
+     [0.65   0.62   0.64   ... 1.1145 1.45   1.27  ]
+     [0.01   0.     0.     ... 0.     0.     0.01  ]
+     ...
+     [0.     0.     0.     ... 0.     0.     0.    ]
+     [0.101  0.0728 0.0593 ... 0.75   1.06   0.36  ]
+     [0.     0.     0.     ... 0.     0.     0.    ]]
+    """
+    extracter = DataExtracter("../data/96data201501.csv")
+    rang = range(0, extracter.getColLen() - 3)
+    transformer = Transformer(extracter.select(rang))
+    date = "2015-01-01"
+    time = str(datetime.datetime.strptime(date, "%Y-%m-%d").date())
+    lastData = transformer.filterTime(time)
+    data_matrix = lastData.loc[:, '1':'93']  # 上述操作主要是数据的加载和抽取
+    print(lastData)
+    print(data_matrix.values)
+    print("---------------------------------------------------")
     x = np.array([[1, 2], [1.5, 1.8], [5, 8], [8, 8], [1, 0.6], [9, 11]])
     k_means = KMeans(k=2)
     k_means.fit(x)
