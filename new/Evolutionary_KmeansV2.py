@@ -2,14 +2,15 @@
 # Time : 2021/6/20
 # Author : Xiangyuan Kong
 import datetime
+import sys
 
 import numpy as np
 from matplotlib import pyplot
 from sklearn.metrics.cluster import silhouette_score
 from sklearn.metrics.pairwise import cosine_distances
 
-from ETL.Extract import DataExtracter
-from ETL.Transform import Transformer
+# from ETL.Extract import DataExtracter
+# from ETL.Transform import Transformer
 
 
 class KMeans(object):
@@ -76,14 +77,14 @@ class KMeans(object):
             if optimized:
                 break
         if self.use_evo:
-            # todo 使用演化聚类公式更新聚类中心
+            # 使用演化聚类公式更新聚类中心
             temp_center = self.centers_
-            for num, center in self.centers_:
+            for num, center in self.centers_.items():
                 prev_num, closest_center = self.closest(center)
                 gamma = len(self.clf_[num]) / (len(self.clf_[num]) + len(self.prev_data[prev_num]))
                 center = (1 - gamma) * self.cp * closest_center + gamma * (1 - self.cp) * center
                 self.centers_[num] = center
-            sq = self.sq(data)
+            sq = self.sq()
             hq = self.hq(data)
             self.cur_quality = sq - self.cp * hq
             if (self.prev_quality - self.cur_quality) / self.prev_quality < self.beta:
@@ -99,19 +100,29 @@ class KMeans(object):
         index = distances.index(min(distances))
         return index
 
-    def sq(self, x_data):
-        return silhouette_score(x_data, self.centers_.values())
+    def sq(self):
+        label = []
+        data_list = []
+        for num, data_set in self.clf_.items():
+            for data in data_set:
+                label.append(num)
+                data_list.append(data)
+        return silhouette_score(data_list, labels=label)
 
     def hq(self, x_data):
         # todo
+        label = []
+        data_list = []
+        for x_data_item in x_data:
+
         return cosine_distances(x_data, self.prev_time_centers.values())
 
     def closest(self, center):
         # 返回t-1时刻距离最近的聚类中心
-        min_distance = -1
+        min_distance = sys.maxsize
         closest_center = []
         min_num = -1
-        for last_num, last_center in self.prev_time_centers:
+        for last_num, last_center in self.prev_time_centers.items():
             cur_distance = np.sqrt(np.sum((np.array(last_center) - np.array(center)) ** 2))
             if cur_distance < min_distance:
                 closest_center = last_center
@@ -124,28 +135,32 @@ def main():
     last_center = {}
     last_data = {}
     last_quality = 0
-    for i in range(30):
+    for i in range(10):
         if i == 0:
-            model = KMeans(k=6)
-            model.fit(x_test)
-            last_center = model.centers_
-            # do something on model.centers_
-            last_data = model.clf_
-            # do something on model.clf_
+            model = KMeans(k=3)
         else:
-            model = KMeans(k=6, use_evo=True, prev_time_centers=last_center, prev_data=last_data,
+            model = KMeans(k=3, use_evo=True, prev_time_centers=last_center, prev_data=last_data,
                            prev_quality=last_quality)
-            model.fit(x_test)
-            last_center = model.centers_
-            # do something on model.centers_
-            last_data = model.clf_
-            # do something on model.clf_
+        model.fit(x_test)
+        last_center = model.centers_
+        # do something on model.centers_
+        pyplot.figure(100)
+        print(last_center)
+        for num, centers in last_center.items():
+            pyplot.plot(centers, label=num)
+        last_data = model.clf_
+        # do something on model.clf_
+        for num, data_points in last_data.items():
+            pyplot.figure(num)
+            for data in data_points:
+                pyplot.plot(data)
+        pyplot.show()
 
 
 if __name__ == '__main__':
     """
     96data201501.csv数据格式：
-              ycid        time      1       5  ...    93      sum  maxload  minload
+            y_cid        time      1       5  ...    93      sum  max_load min_load
     0      5776593  2015-01-01  0.070  0.0600  ...  0.06   1.8334     0.14     0.06
     32     5782689  2015-01-01  0.650  0.6200  ...  1.27  22.6817     2.10     0.10
     71     5880741  2015-01-01  0.010  0.0000  ...  0.01   0.0662     0.01     0.00
@@ -168,31 +183,32 @@ if __name__ == '__main__':
      [0.101  0.0728 0.0593 ... 0.75   1.06   0.36  ]
      [0.     0.     0.     ... 0.     0.     0.    ]]
     """
-    extracter = DataExtracter("../data/96data201501.csv")
-    rang = range(0, extracter.getColLen() - 3)
-    transformer = Transformer(extracter.select(rang))
-    date = "2015-01-01"
-    time = str(datetime.datetime.strptime(date, "%Y-%m-%d").date())
-    lastData = transformer.filterTime(time)
-    data_matrix = lastData.loc[:, '1':'93']  # 上述操作主要是数据的加载和抽取
-    print(lastData)
-    print(data_matrix.values)
-    print("---------------------------------------------------")
-    x = np.array([[1, 2], [1.5, 1.8], [5, 8], [8, 8], [1, 0.6], [9, 11]])
-    k_means = KMeans(k=2)
-    k_means.fit(x)
-    print(k_means.centers_)
-    for clustering_center in k_means.centers_:
-        pyplot.scatter(k_means.centers_[clustering_center][0], k_means.centers_[clustering_center][1], marker='*',
-                       s=150)
-
-    for cat in k_means.clf_:
-        for point in k_means.clf_[cat]:
-            pyplot.scatter(point[0], point[1], c=('r' if cat == 0 else 'b'))
-
-    predict = [[2, 1], [6, 9]]
-    for data_point in predict:
-        cat = k_means.predict(predict)
-        pyplot.scatter(data_point[0], data_point[1], c=('r' if cat == 0 else 'b'), marker='x')
-
-    pyplot.show()
+    main()
+    # extractor = DataExtracter("../data/96data201501.csv")
+    # rang = range(0, extractor.getColLen() - 3)
+    # transformer = Transformer(extractor.select(rang))
+    # date = "2015-01-01"
+    # time = str(datetime.datetime.strptime(date, "%Y-%m-%d").date())
+    # lastData = transformer.filterTime(time)
+    # data_matrix = lastData.loc[:, '1':'93']  # 上述操作主要是数据的加载和抽取
+    # print(lastData)
+    # print(data_matrix.values)
+    # print("---------------------------------------------------")
+    # x = np.array([[1, 2], [1.5, 1.8], [5, 8], [8, 8], [1, 0.6], [9, 11]])
+    # k_means = KMeans(k=2)
+    # k_means.fit(x)
+    # print(k_means.centers_)
+    # for clustering_center in k_means.centers_:
+    #     pyplot.scatter(k_means.centers_[clustering_center][0], k_means.centers_[clustering_center][1], marker='*',
+    #                    s=150)
+    #
+    # for cat in k_means.clf_:
+    #     for point in k_means.clf_[cat]:
+    #         pyplot.scatter(point[0], point[1], c=('r' if cat == 0 else 'b'))
+    #
+    # predict = [[2, 1], [6, 9]]
+    # for data_point in predict:
+    #     cat = k_means.predict(predict)
+    #     pyplot.scatter(data_point[0], data_point[1], c=('r' if cat == 0 else 'b'), marker='x')
+    #
+    # pyplot.show()
