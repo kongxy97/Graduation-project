@@ -7,10 +7,9 @@ import sys
 import numpy as np
 from matplotlib import pyplot
 from sklearn.metrics.cluster import silhouette_score
-from sklearn.metrics.pairwise import cosine_distances
 
-# from ETL.Extract import DataExtracter
-# from ETL.Transform import Transformer
+from ETL.Extract import DataExtracter
+from ETL.Transform import Transformer
 
 
 class KMeans(object):
@@ -46,7 +45,7 @@ class KMeans(object):
             self.centers_ = self.prev_time_centers
         else:
             for i in range(self.k_):
-                self.centers_[i] = data[i]
+                self.centers_[i] = data[i] + 0.01
 
         for i in range(self.max_iter_):
             self.clf_ = {}
@@ -65,6 +64,9 @@ class KMeans(object):
             # print("分组情况:", self.clf_)
             prev_centers = dict(self.centers_)
             for c in self.clf_:
+                # print(self.clf_[c])
+                # if not self.clf_[c]:
+                #     self.clf_[c] = self.clf_[c-1]
                 self.centers_[c] = np.average(self.clf_[c], axis=0)
 
             # '中心点'是否在误差范围
@@ -94,6 +96,8 @@ class KMeans(object):
                 self.reset = True
             else:
                 self.cur_quality = sq
+        else:
+            self.cur_quality = self.sq()
 
     def predict(self, p_data):
         distances = [np.linalg.norm(np.array(p_data) - np.array(self.centers_[center])) for center in self.centers_]
@@ -110,12 +114,19 @@ class KMeans(object):
         return silhouette_score(data_list, labels=label)
 
     def hq(self, x_data):
-        # todo
         label = []
         data_list = []
         for x_data_item in x_data:
-
-        return cosine_distances(x_data, self.prev_time_centers.values())
+            min_label = -1
+            min_dis = sys.maxsize
+            for num, center in self.prev_time_centers.items():
+                cur_distance = np.sqrt(np.sum((np.array(x_data_item) - np.array(center)) ** 2))
+                if cur_distance < min_dis:
+                    min_dis = cur_distance
+                    min_label = num
+            label.append(min_label)
+            data_list.append(x_data_item)
+        return silhouette_score(data_list, labels=label)
 
     def closest(self, center):
         # 返回t-1时刻距离最近的聚类中心
@@ -131,21 +142,31 @@ class KMeans(object):
 
 
 def main():
-    x_test = np.array([[1, 2], [1.5, 1.8], [5, 8], [8, 8], [1, 0.6], [9, 11]])
+    extractor = DataExtracter("../data/96data201501.csv")
+    rang = range(0, extractor.getColLen() - 3)
+    transformer = Transformer(extractor.select(rang))
+    date = "2015-01-01"
+    cur_date = datetime.datetime.strptime(date, "%Y-%m-%d").date()
     last_center = {}
     last_data = {}
     last_quality = 0
-    for i in range(10):
-        if i == 0:
-            model = KMeans(k=3)
+    for i in range(1):
+        time = str(cur_date + datetime.timedelta(days=i))
+        cur_data = transformer.filterTime(time)
+        data_matrix = cur_data.loc[:, '1':'93']  # 上述操作主要是数据的加载和抽取
+        if i >= 0:
+            model = KMeans(k=5)
         else:
-            model = KMeans(k=3, use_evo=True, prev_time_centers=last_center, prev_data=last_data,
+            model = KMeans(k=5, use_evo=True, prev_time_centers=last_center, prev_data=last_data,
                            prev_quality=last_quality)
-        model.fit(x_test)
+        model.fit(data_matrix.values)
+        last_quality = model.cur_quality
         last_center = model.centers_
         # do something on model.centers_
         pyplot.figure(100)
-        print(last_center)
+        # print(last_center)
+        if model.reset:
+            print(time + " reset")
         for num, centers in last_center.items():
             pyplot.plot(centers, label=num)
         last_data = model.clf_
@@ -184,13 +205,6 @@ if __name__ == '__main__':
      [0.     0.     0.     ... 0.     0.     0.    ]]
     """
     main()
-    # extractor = DataExtracter("../data/96data201501.csv")
-    # rang = range(0, extractor.getColLen() - 3)
-    # transformer = Transformer(extractor.select(rang))
-    # date = "2015-01-01"
-    # time = str(datetime.datetime.strptime(date, "%Y-%m-%d").date())
-    # lastData = transformer.filterTime(time)
-    # data_matrix = lastData.loc[:, '1':'93']  # 上述操作主要是数据的加载和抽取
     # print(lastData)
     # print(data_matrix.values)
     # print("---------------------------------------------------")
