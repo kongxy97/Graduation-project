@@ -2,6 +2,7 @@
 # Time : 2021/6/20
 # Author : Xiangyuan Kong
 import datetime
+import random
 import sys
 
 import numpy as np
@@ -10,6 +11,9 @@ from sklearn.metrics.cluster import silhouette_score
 
 from ETL.Extract import DataExtracter
 from ETL.Transform import Transformer
+from numpy import seterr
+
+seterr(all='raise')
 
 
 class KMeans(object):
@@ -45,7 +49,9 @@ class KMeans(object):
             self.centers_ = self.prev_time_centers
         else:
             for i in range(self.k_):
-                self.centers_[i] = data[i] + 0.01
+                self.centers_[i] = []
+                for j in range(24):
+                    self.centers_[i].append(random.uniform(0, 5.0))
 
         for i in range(self.max_iter_):
             self.clf_ = {}
@@ -57,7 +63,14 @@ class KMeans(object):
                 for center in self.centers_:
                     # 欧拉距离
                     # np.sqrt(np.sum((features-self.centers_[center])**2))
-                    distances.append(np.linalg.norm(feature - self.centers_[center]))
+                    # distances.append(np.linalg.norm(feature - self.centers_[center]))
+                    num = np.array(feature).dot(np.array(self.centers_[center]))
+                    de_nom = np.linalg.norm(feature) * np.linalg.norm(self.centers_[center])
+                    if num == 0 and de_nom == 0:
+                        de_nom += 0.01
+                    cos = num / de_nom
+                    sim = 0.5 - 0.5 * cos
+                    distances.append(sim)
                 classification = distances.index(min(distances))
                 self.clf_[classification].append(feature)
 
@@ -155,7 +168,7 @@ def main():
         cur_data = transformer.filterTime(time)
         data_matrix = cur_data.loc[:, '1':'93']  # 上述操作主要是数据的加载和抽取
         if i >= 0:
-            model = KMeans(k=5)
+            model = KMeans(k=10)
         else:
             model = KMeans(k=5, use_evo=True, prev_time_centers=last_center, prev_data=last_data,
                            prev_quality=last_quality)
