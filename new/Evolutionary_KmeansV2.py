@@ -64,13 +64,14 @@ class KMeans(object):
                     # 欧拉距离
                     # np.sqrt(np.sum((features-self.centers_[center])**2))
                     # distances.append(np.linalg.norm(feature - self.centers_[center]))
+                    ora = np.linalg.norm(feature - self.centers_[center])
                     num = np.array(feature).dot(np.array(self.centers_[center]))
                     de_nom = np.linalg.norm(feature) * np.linalg.norm(self.centers_[center])
                     if num == 0 and de_nom == 0:
                         de_nom += 0.01
                     cos = num / de_nom
                     sim = 0.5 - 0.5 * cos
-                    distances.append(sim)
+                    distances.append(0.9 * sim + 0.02 * ora)
                 classification = distances.index(min(distances))
                 self.clf_[classification].append(feature)
 
@@ -163,14 +164,14 @@ def main():
     last_center = {}
     last_data = {}
     last_quality = 0
-    for i in range(1):
+    for i in range(2):
         time = str(cur_date + datetime.timedelta(days=i))
         cur_data = transformer.filterTime(time)
         data_matrix = cur_data.loc[:, '1':'93']  # 上述操作主要是数据的加载和抽取
-        if i >= 0:
-            model = KMeans(k=10)
+        if i == 0:
+            model = KMeans(k=6)
         else:
-            model = KMeans(k=5, use_evo=True, prev_time_centers=last_center, prev_data=last_data,
+            model = KMeans(k=6, use_evo=True, prev_time_centers=last_center, prev_data=last_data,
                            prev_quality=last_quality)
         model.fit(data_matrix.values)
         last_quality = model.cur_quality
